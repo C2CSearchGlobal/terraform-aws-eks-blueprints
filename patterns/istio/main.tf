@@ -48,7 +48,8 @@ locals {
 
   tags = {
     Blueprint  = local.name
-    GithubRepo = "github.com/aws-ia/terraform-aws-eks-blueprints"
+    GithubRepo = "github.com/C2CSearchGlobal/terraform-aws-eks-blueprints"
+    CreatedBy = "Naver"
   }
 }
 
@@ -69,9 +70,10 @@ module "eks" {
   enable_cluster_creator_admin_permissions = true
 
   cluster_addons = {
-    coredns    = {}
-    kube-proxy = {}
-    vpc-cni    = {}
+    coredns    = {most_recent = true}
+    eks-pod-identity-agent = {most_recent = true}
+    kube-proxy = {most_recent = true}
+    vpc-cni    = {most_recent = true}
   }
 
   vpc_id     = module.vpc.vpc_id
@@ -79,11 +81,11 @@ module "eks" {
 
   eks_managed_node_groups = {
     initial = {
-      instance_types = ["m5.large"]
+      instance_types = ["m5.xlarge"]
 
       min_size     = 1
       max_size     = 5
-      desired_size = 2
+      desired_size = 3
     }
   }
 
@@ -177,6 +179,14 @@ module "eks_blueprints_addons" {
                 "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "ip"
                 "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internet-facing"
                 "service.beta.kubernetes.io/aws-load-balancer-attributes"      = "load_balancing.cross_zone.enabled=true"
+                "service.beta.kubernetes.io/aws-load-balancer-target-group-attributes" = "preserve_client_ip.enabled=true"
+              }
+              spec = {
+                loadBalancerSourceRanges = [
+                  "71.197.219.6/32",
+                  "73.42.160.122/32",
+                  "75.103.15.206/32",
+                ]
               }
             }
           }
@@ -215,4 +225,75 @@ module "vpc" {
   }
 
   tags = local.tags
+}
+
+module "iam_eks_role" {
+  source    = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  role_name = "${local.name}-indexing-role"
+
+  # Policies to access MSK and Secrets Manager
+  role_policy_arns = {
+    arte-msk-client-policy = "arn:aws:iam::314945786589:policy/arte-msk-client-policy"
+    arte-secrets-manager-policy = "arn:aws:iam::314945786589:policy/arte-secrets-manager-policy"
+  }
+
+  oidc_providers = {
+    oidc_provider = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["indexing:indexing-sa"]
+    }
+  }
+
+  tags = local.tags
+}
+
+resource "aws_vpc_endpoint" "sts" {
+  vpc_id       = module.vpc.vpc_id
+  service_name = "com.amazonaws.us-east-2.sts"
+  vpc_endpoint_type = "Interface"
+  private_dns_enabled = true
+  subnet_ids = module.vpc.private_subnets
+  tags = local.tags
+}
+
+resource "kubernetes_namespace_v1" "indexing" {
+  metadata {
+    name = "indexing"
+    labels = {
+      istio-injection = true
+    }
+  }
+}
+
+resource "kubernetes_service_account" "indexing-sa" {
+  metadata {
+    name = "indexing-sa"
+    namespace = "indexing"
+    annotations = {
+      "eks.amazonaws.com/role-arn" = module.iam_eks_role.iam_role_arn
+    }
+  }
+
+  depends_on = [
+    kubernetes_namespace_v1.indexing,
+    module.iam_eks_role
+  ]
+}
+
+resource "helm_release" "csi-secrets-store" {
+  name       = "csi-secrets-store"
+  repository = "https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts"
+  chart      = "secrets-store-csi-driver"
+  namespace  = "kube-system"
+  set {
+    name  = "syncSecret.enabled"
+    value = "true"
+  }
+}
+
+resource "helm_release" "secrets-provider-aws" {
+  name       = "secrets-provider-aws"
+  repository = "https://aws.github.io/secrets-store-csi-driver-provider-aws"
+  chart      = "secrets-store-csi-driver-provider-aws"
+  namespace  = "kube-system"
 }
