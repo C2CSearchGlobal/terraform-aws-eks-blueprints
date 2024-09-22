@@ -37,14 +37,14 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  name   = "arte"
+  name   = "arte2"
   region = "us-east-2"
 
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 3)
 
   istio_chart_url     = "https://istio-release.storage.googleapis.com/charts"
-  istio_chart_version = "1.20.2"
+  istio_chart_version = "1.23.2"
 
   tags = {
     Blueprint  = local.name
@@ -59,7 +59,7 @@ locals {
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.11"
+  version = "20.24.2"
 
   cluster_name                   = local.name
   cluster_version                = "1.30"
@@ -71,7 +71,6 @@ module "eks" {
 
   cluster_addons = {
     coredns    = {most_recent = true}
-    eks-pod-identity-agent = {most_recent = true}
     kube-proxy = {most_recent = true}
     vpc-cni    = {most_recent = true}
   }
@@ -125,7 +124,7 @@ resource "kubernetes_namespace_v1" "istio_system" {
 
 module "eks_blueprints_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
-  version = "~> 1.16"
+  version = "1.16.3"
 
   cluster_name      = module.eks.cluster_name
   cluster_endpoint  = module.eks.cluster_endpoint
@@ -179,16 +178,13 @@ module "eks_blueprints_addons" {
                 "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "ip"
                 "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internet-facing"
                 "service.beta.kubernetes.io/aws-load-balancer-attributes"      = "load_balancing.cross_zone.enabled=true"
-                "service.beta.kubernetes.io/aws-load-balancer-target-group-attributes" = "preserve_client_ip.enabled=true"
-              }
-              spec = {
-                loadBalancerSourceRanges = [
-                  "71.197.219.6/32",
-                  "73.42.160.122/32",
-                  "75.103.15.206/32",
-                ]
               }
             }
+            loadBalancerSourceRanges = [
+              "71.197.219.6/32",
+              "73.42.160.122/32",
+              "75.103.15.206/32",
+            ]
           }
         )
       ]
@@ -204,7 +200,7 @@ module "eks_blueprints_addons" {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+  version = "5.13.0"
 
   name = local.name
   cidr = local.vpc_cidr
@@ -222,6 +218,23 @@ module "vpc" {
 
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = 1
+  }
+
+  tags = local.tags
+}
+
+module "vpc_cni_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  role_name = "${module.eks.cluster_name}-vpc-cni-role"
+
+  attach_vpc_cni_policy = true
+  vpc_cni_enable_ipv4   = true
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:aws-node"]
+    }
   }
 
   tags = local.tags
@@ -247,15 +260,6 @@ module "iam_eks_role" {
   tags = local.tags
 }
 
-resource "aws_vpc_endpoint" "sts" {
-  vpc_id       = module.vpc.vpc_id
-  service_name = "com.amazonaws.us-east-2.sts"
-  vpc_endpoint_type = "Interface"
-  private_dns_enabled = true
-  subnet_ids = module.vpc.private_subnets
-  tags = local.tags
-}
-
 resource "kubernetes_namespace_v1" "indexing" {
   metadata {
     name = "indexing"
@@ -265,7 +269,7 @@ resource "kubernetes_namespace_v1" "indexing" {
   }
 }
 
-resource "kubernetes_service_account" "indexing-sa" {
+resource "kubernetes_service_account" "indexing_sa" {
   metadata {
     name = "indexing-sa"
     namespace = "indexing"
