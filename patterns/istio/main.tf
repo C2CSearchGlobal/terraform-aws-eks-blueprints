@@ -178,13 +178,9 @@ module "eks_blueprints_addons" {
                 "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type" = "ip"
                 "service.beta.kubernetes.io/aws-load-balancer-scheme"          = "internet-facing"
                 "service.beta.kubernetes.io/aws-load-balancer-attributes"      = "load_balancing.cross_zone.enabled=true"
+                "service.beta.kubernetes.io/load-balancer-source-ranges"       = "71.197.219.6/32,73.42.160.122/32,75.103.15.206/32"
               }
             }
-            loadBalancerSourceRanges = [
-              "71.197.219.6/32",
-              "73.42.160.122/32",
-              "75.103.15.206/32",
-            ]
           }
         )
       ]
@@ -264,7 +260,7 @@ resource "kubernetes_namespace_v1" "indexing" {
   metadata {
     name = "indexing"
     labels = {
-      istio-injection = true
+      istio-injection = "enabled"
     }
   }
 }
