@@ -37,7 +37,7 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  name   = "arte2"
+  name   = "arte"
   region = "us-east-2"
 
   vpc_cidr = "10.0.0.0/16"
@@ -62,7 +62,7 @@ module "eks" {
   version = "20.24.2"
 
   cluster_name                   = local.name
-  cluster_version                = "1.30"
+  cluster_version                = "1.31"
   cluster_endpoint_public_access = true
 
   # Give the Terraform identity admin access to the cluster
@@ -154,6 +154,18 @@ module "eks_blueprints_addons" {
         {
           name  = "meshConfig.accessLogFile"
           value = "/dev/stdout"
+        },
+        {
+          name = "meshConfig.enableTracing"
+          value = true
+        },
+        {
+          name = "meshConfig.defaultConfig.tracing.sampling"
+          value = 100
+        },
+        {
+          name = "meshConfig.defaultConfig.tracing.zipkin.address"
+          value = "zipkin.istio-system:9411"
         }
       ]
     }
